@@ -1,5 +1,7 @@
 name: Actor configuration preflight
 on:
+  push:
+    branches: [codex/actor-config-preflight]
   workflow_dispatch:
     inputs:
       contribution_sha:
@@ -18,12 +20,12 @@ jobs:
       matrix:
         python: ['3.10', '3.11', '3.12', '3.13', '3.14']
     env:
-      PATCH_SHA: ${{ inputs.contribution_sha }}
-      BASE_SHA: ${{ inputs.baseline_sha }}
+      PATCH_SHA: ${{ inputs.contribution_sha || '13ec8464418caa4fd0ffcb829d8a0c7721fa990e' }}
+      BASE_SHA: ${{ inputs.baseline_sha || 'aa4a88640a99411dfce931e7187df921f9926dfb' }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.contribution_sha }}
+          ref: ${{ inputs.contribution_sha || '13ec8464418caa4fd0ffcb829d8a0c7721fa990e' }}
           fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
