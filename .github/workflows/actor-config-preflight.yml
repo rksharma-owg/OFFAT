@@ -1,0 +1,75 @@
+name: Actor configuration preflight
+on:
+  workflow_dispatch:
+    inputs:
+      contribution_sha:
+        required: true
+        type: string
+      baseline_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12', '3.13', '3.14']
+    env:
+      PATCH_SHA: ${{ inputs.contribution_sha }}
+      BASE_SHA: ${{ inputs.baseline_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.contribution_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Verify exact commits
+        run: |
+          test "$(git rev-parse HEAD)" = "$PATCH_SHA"
+          test "$(git merge-base "$BASE_SHA" "$PATCH_SHA")" = "$BASE_SHA"
+          python --version
+      - name: Install development environment
+        run: python -m pip install -e ./src pytest build requests
+      - name: Verify clean baseline suite
+        run: |
+          git checkout --detach "$BASE_SHA"
+          cd src
+          python -m pytest -q
+      - name: Verify regression fails for the reported defect
+        run: |
+          git show "$PATCH_SHA:src/offat/tests/test_config_data_handler.py" > src/offat/tests/test_config_data_handler.py
+          cd src
+          python - <<'PY'
+          import subprocess
+          import xml.etree.ElementTree as ET
+          result = subprocess.run([
+              'python', '-m', 'pytest', '-q',
+              'offat/tests/test_config_data_handler.py::TestReadmeConfig::test_readme_config_validates',
+              '--junitxml=regression.xml',
+          ])
+          assert result.returncode == 1, result.returncode
+          cases = ET.parse('regression.xml').findall('.//testcase')
+          assert len(cases) == 1
+          assert cases[0].find('error') is None
+          failure = cases[0].find('failure')
+          assert failure is not None
+          assert 'False !=' in failure.get('message', '')
+          PY
+          rm offat/tests/test_config_data_handler.py regression.xml
+      - name: Verify exact contribution and run full suite
+        run: |
+          git checkout --detach "$PATCH_SHA"
+          test "$(git rev-parse HEAD)" = "$PATCH_SHA"
+          git diff --check "$BASE_SHA...$PATCH_SHA"
+          cd src
+          python -m pytest -q
+      - name: Build distribution
+        working-directory: src
+        run: python -m build
+      - name: Record installed versions
+        run: python -m pip freeze
